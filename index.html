@@ -207,29 +207,16 @@ function enableAudio() {
 class MusicPlayer {
   constructor() {
     this.tracks = {
-      1: "music/level1.wav",
-      2: "music/level2.wav",
-      3: "music/level3.wav"
-    };
-    this.nativeTracks = {
       1: document.getElementById("bgm1"),
       2: document.getElementById("bgm2"),
       3: document.getElementById("bgm3")
     };
-    for (const track of Object.values(this.nativeTracks)) {
+    for (const track of Object.values(this.tracks)) {
       track.loop = true;
       track.volume = 0.35;
     }
-    this.nativeLevel = null;
-    this.nativePendingLevel = null;
     this.currentLevel = null;
-    this.currentBuffer = null;
-    this.currentSource = null;
-    this.gainNode = null;
-    this.offset = 0;
-    this.startedAt = 0;
-    this.requestId = 0;
-    this.loading = false;
+    this.pendingLevel = null;
     this.failedLevel = null;
     this.unlocked = false;
     this.enabled = true;
@@ -245,76 +232,42 @@ class MusicPlayer {
   }
 
   sync(mode, level) {
-    if (location.protocol === "file:") {
-      this.syncNative(mode, level);
-      return;
-    }
-
     const activeLevel = this.unlocked && mode === "playing" ? level : null;
     if (activeLevel !== this.currentLevel) {
-      this.requestId += 1;
-      this.stopSource(true);
-      this.currentLevel = activeLevel;
-      this.currentBuffer = null;
-      this.loading = false;
-      this.failedLevel = null;
-    }
-
-    const shouldPlay = activeLevel !== null && this.enabled && document.visibilityState === "visible";
-    if (!shouldPlay) {
-      if (this.currentSource) this.stopSource(false);
-      return;
-    }
-
-    if (this.currentSource || this.loading || this.failedLevel === activeLevel) return;
-    const requestId = this.requestId;
-    this.loading = true;
-    this.startTrack(activeLevel, requestId)
-      .catch(error => {
-        if (requestId !== this.requestId) return;
-        this.failedLevel = activeLevel;
-        console.error(`第 ${activeLevel} 关背景音乐加载或播放失败：`, error);
-      })
-      .finally(() => {
-        if (requestId === this.requestId) this.loading = false;
-      });
-  }
-
-  syncNative(mode, level) {
-    const activeLevel = this.unlocked && mode === "playing" ? level : null;
-    if (activeLevel !== this.nativeLevel) {
-      const previousTrack = this.nativeTracks[this.nativeLevel];
+      const previousTrack = this.tracks[this.currentLevel];
       if (previousTrack) {
         previousTrack.pause();
         previousTrack.currentTime = 0;
       }
-      this.nativeLevel = activeLevel;
-      this.nativePendingLevel = null;
+      this.currentLevel = activeLevel;
+      this.pendingLevel = null;
       this.failedLevel = null;
+      const activeTrack = this.tracks[activeLevel];
+      if (activeTrack) activeTrack.currentTime = 0;
     }
 
-    const track = this.nativeTracks[activeLevel];
+    const track = this.tracks[activeLevel];
     const shouldPlay = activeLevel !== null && this.enabled && document.visibilityState === "visible";
     if (!shouldPlay) {
       if (track && !track.paused) track.pause();
       return;
     }
 
-    if (!track.paused || this.nativePendingLevel === activeLevel || this.failedLevel === activeLevel) return;
+    if (!track.paused || this.pendingLevel === activeLevel || this.failedLevel === activeLevel) return;
     try {
       const playRequest = track.play();
       if (playRequest && typeof playRequest.then === "function") {
-        this.nativePendingLevel = activeLevel;
+        this.pendingLevel = activeLevel;
         playRequest.then(
           () => {
-            if (this.nativePendingLevel === activeLevel) this.nativePendingLevel = null;
+            if (this.pendingLevel === activeLevel) this.pendingLevel = null;
           },
           error => {
-            if (this.nativeLevel === activeLevel) {
+            if (this.currentLevel === activeLevel && error.name !== "AbortError") {
               this.failedLevel = activeLevel;
               console.error(`第 ${activeLevel} 关背景音乐播放失败：`, error);
             }
-            if (this.nativePendingLevel === activeLevel) this.nativePendingLevel = null;
+            if (this.pendingLevel === activeLevel) this.pendingLevel = null;
           }
         );
       }
@@ -322,57 +275,6 @@ class MusicPlayer {
       this.failedLevel = activeLevel;
       console.error(`第 ${activeLevel} 关背景音乐播放失败：`, error);
     }
-  }
-
-  isActive(level, requestId) {
-    return requestId === this.requestId &&
-      this.currentLevel === level &&
-      this.enabled &&
-      document.visibilityState === "visible";
-  }
-
-  async startTrack(level, requestId) {
-    if (!audioContext) throw new Error("音频上下文尚未初始化");
-    if (audioContext.state !== "running") await audioContext.resume();
-    if (!this.isActive(level, requestId)) return;
-
-    if (!this.currentBuffer) {
-      const response = await fetch(this.tracks[level]);
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${this.tracks[level]}`);
-      const data = await response.arrayBuffer();
-      const buffer = await new Promise((resolve, reject) => {
-        audioContext.decodeAudioData(data, resolve, reject);
-      });
-      if (!this.isActive(level, requestId)) return;
-      this.currentBuffer = buffer;
-    }
-
-    if (!this.isActive(level, requestId)) return;
-    if (!this.gainNode) {
-      this.gainNode = audioContext.createGain();
-      this.gainNode.gain.value = 0.35;
-      this.gainNode.connect(audioContext.destination);
-    }
-
-    const source = audioContext.createBufferSource();
-    source.buffer = this.currentBuffer;
-    source.loop = true;
-    source.connect(this.gainNode);
-    source.start(0, this.offset);
-    this.currentSource = source;
-    this.startedAt = audioContext.currentTime;
-  }
-
-  stopSource(reset) {
-    if (this.currentSource) {
-      if (!reset && this.currentBuffer) {
-        this.offset = (this.offset + audioContext.currentTime - this.startedAt) % this.currentBuffer.duration;
-      }
-      this.currentSource.stop();
-      this.currentSource.disconnect();
-      this.currentSource = null;
-    }
-    if (reset) this.offset = 0;
   }
 }
 
