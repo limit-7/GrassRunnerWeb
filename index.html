@@ -1051,7 +1051,7 @@ class Game {
 }
 
 const game = new Game();
-canvas.addEventListener("pointerdown", event => {
+canvas.addEventListener("click", event => {
   event.preventDefault();
   canvas.focus({ preventScroll: true });
   game.inputAction();
