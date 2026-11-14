@@ -61,9 +61,6 @@
   </style>
 </head>
 <body>
-  <audio id="bgm1" src="music/level1.wav" loop preload="auto"></audio>
-  <audio id="bgm2" src="music/level2.wav" loop preload="auto"></audio>
-  <audio id="bgm3" src="music/level3.wav" loop preload="auto"></audio>
   <canvas id="game" width="800" height="450" aria-label="小草快跑游戏画布" tabindex="0"></canvas>
   <div id="orientationNotice" role="status" aria-live="polite">
     <span class="phone" aria-hidden="true">📱</span>
@@ -207,18 +204,26 @@ function enableAudio() {
 class MusicPlayer {
   constructor() {
     this.tracks = {
-      1: document.getElementById("bgm1"),
-      2: document.getElementById("bgm2"),
-      3: document.getElementById("bgm3")
+      1: "music/level1.wav",
+      2: "music/level2.wav",
+      3: "music/level3.wav"
     };
-    this.currentTrack = null;
+    this.currentLevel = null;
+    this.currentBuffer = null;
+    this.currentSource = null;
+    this.gainNode = null;
+    this.offset = 0;
+    this.startedAt = 0;
+    this.requestId = 0;
+    this.loading = false;
+    this.failedLevel = null;
     this.unlocked = false;
     this.enabled = true;
-    for (const track of Object.values(this.tracks)) track.volume = 0.35;
   }
 
   unlock() {
     this.unlocked = true;
+    this.failedLevel = null;
   }
 
   toggle() {
@@ -226,28 +231,85 @@ class MusicPlayer {
   }
 
   sync(mode, level) {
-    const activeTrack = this.unlocked && mode === "playing" ? this.tracks[level] : null;
-    const shouldPlay = activeTrack && this.enabled && document.visibilityState === "visible";
-
-    if (this.currentTrack !== activeTrack) {
-      if (this.currentTrack) {
-        this.currentTrack.pause();
-        this.currentTrack.currentTime = 0;
-      }
-      if (activeTrack) activeTrack.currentTime = 0;
-      this.currentTrack = activeTrack;
+    const activeLevel = this.unlocked && mode === "playing" ? level : null;
+    if (activeLevel !== this.currentLevel) {
+      this.requestId += 1;
+      this.stopSource(true);
+      this.currentLevel = activeLevel;
+      this.currentBuffer = null;
+      this.loading = false;
+      this.failedLevel = null;
     }
 
+    const shouldPlay = activeLevel !== null && this.enabled && document.visibilityState === "visible";
     if (!shouldPlay) {
-      if (this.currentTrack) this.currentTrack.pause();
+      if (this.currentSource) this.stopSource(false);
       return;
     }
 
-    if (this.currentTrack && this.currentTrack.paused) {
-      this.currentTrack.play().catch(error => {
-        console.warn("背景音乐播放失败：", error);
+    if (this.currentSource || this.loading || this.failedLevel === activeLevel) return;
+    const requestId = this.requestId;
+    this.loading = true;
+    this.startTrack(activeLevel, requestId)
+      .catch(error => {
+        if (requestId !== this.requestId) return;
+        this.failedLevel = activeLevel;
+        console.error(`第 ${activeLevel} 关背景音乐加载或播放失败：`, error);
+      })
+      .finally(() => {
+        if (requestId === this.requestId) this.loading = false;
       });
+  }
+
+  isActive(level, requestId) {
+    return requestId === this.requestId &&
+      this.currentLevel === level &&
+      this.enabled &&
+      document.visibilityState === "visible";
+  }
+
+  async startTrack(level, requestId) {
+    if (!audioContext) throw new Error("音频上下文尚未初始化");
+    if (audioContext.state !== "running") await audioContext.resume();
+    if (!this.isActive(level, requestId)) return;
+
+    if (!this.currentBuffer) {
+      const response = await fetch(this.tracks[level]);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${this.tracks[level]}`);
+      const data = await response.arrayBuffer();
+      const buffer = await new Promise((resolve, reject) => {
+        audioContext.decodeAudioData(data, resolve, reject);
+      });
+      if (!this.isActive(level, requestId)) return;
+      this.currentBuffer = buffer;
     }
+
+    if (!this.isActive(level, requestId)) return;
+    if (!this.gainNode) {
+      this.gainNode = audioContext.createGain();
+      this.gainNode.gain.value = 0.35;
+      this.gainNode.connect(audioContext.destination);
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = this.currentBuffer;
+    source.loop = true;
+    source.connect(this.gainNode);
+    source.start(0, this.offset);
+    this.currentSource = source;
+    this.startedAt = audioContext.currentTime;
+  }
+
+  stopSource(reset) {
+    if (this.currentSource) {
+      if (!reset && this.currentBuffer) {
+        this.offset = (this.offset + audioContext.currentTime - this.startedAt) % this.currentBuffer.duration;
+      }
+      this.currentSource.stop();
+      this.currentSource.disconnect();
+      this.currentSource = null;
+    }
+    if (reset) this.offset = 0;
   }
 }
 
@@ -885,7 +947,8 @@ class Game {
     text(22, 12, `SCORE  ${String(this.score).padStart(4, "0")}`, "#24324a", 18, true, "Consolas, monospace", "left", "top");
     text(200, 22, `第 ${this.level} 关 · ${LEVEL_NAMES[this.level]}`, "#3d2b5c", 9, true, undefined, "left", "top");
     text(WIDTH - 22, 16, `BEST  ${String(this.best[this.level]).padStart(4, "0")}`, "#24324a", 13, true, "Consolas, monospace", "right", "top");
-    text(WIDTH - 22, 34, `M 音乐：${music.enabled ? "开" : "关"}`, "#3d2b5c", 9, true, undefined, "right", "top");
+    const musicStatus = music.failedLevel ? "加载失败" : music.enabled ? "开" : "关";
+    text(WIDTH - 22, 34, `M 音乐：${musicStatus}`, "#3d2b5c", 9, true, undefined, "right", "top");
 
     if (this.phase === "boss" && this.level === 3) {
       const ratio = this.bossTimer / BOSS_TIME;
