@@ -1,0 +1,1078 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#8bd5ff">
+  <title>小草快跑 - Grass Runner</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #171322;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    }
+    canvas {
+      display: block;
+      width: min(100vw, 177.7778vh);
+      height: min(100vh, 56.25vw);
+      touch-action: none;
+      image-rendering: pixelated;
+      outline: none;
+    }
+    #orientationNotice {
+      display: none;
+    }
+    @media (orientation: portrait) and (max-width: 900px) {
+      #game { display: none; }
+      #orientationNotice {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        gap: 18px;
+        padding: 24px;
+        color: #fff3d4;
+        background: #171322;
+        text-align: center;
+      }
+      #orientationNotice .phone {
+        font-size: 64px;
+        line-height: 1;
+        animation: rotatePhone 1.8s ease-in-out infinite alternate;
+      }
+      #orientationNotice strong { font-size: 22px; }
+      #orientationNotice span:last-child { color: #c9b6ff; font-size: 14px; }
+    }
+    @keyframes rotatePhone {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+  <audio id="bgm1" src="music/level1.wav" loop preload="auto"></audio>
+  <audio id="bgm2" src="music/level2.wav" loop preload="auto"></audio>
+  <audio id="bgm3" src="music/level3.wav" loop preload="auto"></audio>
+  <canvas id="game" width="800" height="450" aria-label="小草快跑游戏画布" tabindex="0"></canvas>
+  <div id="orientationNotice" role="status" aria-live="polite">
+    <span class="phone" aria-hidden="true">📱</span>
+    <strong>请将手机旋转至横屏</strong>
+    <span>横屏后即可开始游戏</span>
+  </div>
+<script>
+"use strict";
+
+const WIDTH = 800;
+const HEIGHT = 450;
+const GROUND_Y = 370;
+const FPS_MS = 16;
+const GRAVITY = 2340;
+const BASE_SPEED = 300;
+const MAX_SPEED = 660;
+const LEVEL1_GOAL = 40;
+const LEVEL2_BOSS_SCORE = 18;
+const LEVEL3_BOSS_SCORE = 20;
+const BOSS_TIME = 15;
+const BOSS_WARNING = 2.5;
+const LEVEL_NAMES = { 1: "四季草原", 2: "甜点山谷", 3: "黄昏草原" };
+const BEE_PALETTE = {
+  K: "#241713", B: "#5d4c3a", Y: "#f8c220", C: "#f0f0da", W: "#f2fdfd"
+};
+const BEE_PIXELS = [
+  "..........................BBBBBB........................",
+  "..........................KKKKKB........................",
+  "........................BBBBBBBBBBB.....................",
+  "........................KKBWWWWCKKK.....................",
+  "........................KKBWWWWCKKK.....................",
+  "......................KKCWWWWWWWWWKB.KKKKBKKKK..........",
+  "......................KKCWWWWWWWWWKB.KKKKKKKKB..........",
+  "..BKKK..............BBBCCWWWWWWWWWKKKCCCCCCCCCBBB.......",
+  "..BKKKKK............KKCWWWWWWWWWWWKKKCWWWWWWWWBKK.......",
+  ".....BKK............KKCWWWWWWWWCCCKKKCWWWWWWWWBKK.......",
+  "......KBKK........BKKKCWWWWWWWWCKKCWWWWWWWWWWWBKK.......",
+  "........KKB.......BKKKCWWWWWWCBBKKCWWWWWWWWWWWBBK.......",
+  "........KKB.......KKCCWWWWWWWCKKWWWWWWWWWWWWWWBKB.......",
+  "........KKKKKKKBBBKKCWWWWWWCCBKKWWWWWWWWWWWWWWBKK.......",
+  "........KKKKKKKKKKKKCWWWWWWBKBWWWWWWWWWWWWWWWWBKK.......",
+  "........KKKKKKKKKKKKBCCCWWWBKBWWWWWWWWWWWWWWCBBKKBBBB...",
+  ".....KKBYYYYYYYYYYYYBKKKCWKKKBWWWWWWWWWWWWWWCKKKKKKKKB..",
+  ".....KKBYYYYYYYYYYYYBKKKCWKKKBWWWWWWWWWWWCCCBBBBBBBBBB..",
+  "..BBBYYYYYYYYYYYYYYYYYYYKKKKCCWWWWWWWWWWWCKKKCWWWWWWWBBK",
+  "..BKKYYYYYYYYYYYYYYYYYYYKKKKCWWWWWWWWWCCCBKKKCWWWWWWWBKB",
+  "..BKKYYYYYYYYYYYYYYYYYYYBBBBBBBCWWCCCCKKKKWWWWWWWWWWWBKK",
+  "BKBYYYYYYYYYYYYYYYYYYYYYYYYYKKBCWWBKKKBBBBWWWWWWWWWWWBKK",
+  "BKBYYBBBYYYYYBBBBYYYYYYYYYYYKKKBCCBKKKCCWWWWWWWWWWWWWBKK",
+  "BKBYYKKKYYYYYBKKBYYYYYYYYYYYKKKKKKKCWWWWWWWWWWWWWWWWWBKK",
+  "BKBYYKKKYYYYYBKKBYYYYYYYYYBBKKKKKKKCWWWWWWWWWWWWWWWBBB..",
+  "BKBYYKKKYYYYYBKKBYYYYYYYYYKKKKKKKKKBCCWWWWWWWWWWWWWBKB..",
+  "BKBYYBBBYYYYYBBBBYYYYYYYBBKKKKKKBBBKKBCCWWWWWCBBBBBBK...",
+  "BKBYYYYYYYYYYYYYYYYYYYYYKKKKKKKBYYYBKKKBWWWWWBKKKKK.....",
+  "KKBYYYYYYYYYYYYYYYYYYYYYKKKKKKKBYYYYYBKKBBBBBBKKBBB.....",
+  "BKBYYYYYYYYYYYYYYYYYYYBKKKKKKKKBYYYYYBKKKKKKKKK.........",
+  "..BKBYYYYYYYYYYYYYYYBBKKKKKKKBBYYYYYYBKKKKKBBBB.........",
+  "..BKKYYYYYYYYYYYYYYYBKKKKKKKKBYYYYYYYBKKKK..............",
+  "....BKKKKKKKKKKKKKKKKKKKKKYYYYYYYYBKKKKKKK..............",
+  ".....KKKKKKKKKKKKKBKKKKKKKYYYYYYYYBKKKKKKK..............",
+  ".....BBBKKKKKKBBBBBBBBYYYYYYYYYYYYBKKKKKKK..............",
+  "........KKKBKBYYYYYYYYYYYYYYYYYYBKKKKKKKYKB.............",
+  ".....BKKKKKBKBYYYYYYYYYYYYYYYBBBKKKKKKKKYKKB............",
+  ".....KKKBBB..BBBYYYYYYYYYYBBBKKKKKKKKBYYYKKB............",
+  ".....BKK.....BKKYYYYYYKKKKKKKKKKKKKKKBYYYKKB............",
+  ".............KKKKKKKKKKKKKKKKKKKKKBYYYYYYKKB............",
+  ".............KKKKKKKKKKKKKKKKKKKKKBYYYYYYKKB............",
+  "...........BBKBKKKKKKKKKKKKKKKKBYYYYYYYKKB..............",
+  "...........KKK..KKKKKYYYYYYYYYYYYYYYYYYKKB..............",
+  ".........KKKKK..KKKKKYYYYYYYYYYYYYYYYYYKKB..............",
+  ".........KKKKB......KKKBYYYYYYYBKKKKKKB.................",
+  "........BKK.........KKKKYYYYYYYBKKKKKKB.................",
+  "........BKK.......BKKKBBKKKKKKKKKKKKKKB.................",
+  "..................BKKK..KKKKKKKKKKKB....................",
+  "................BBKKKK..BBBBBBBKKKBB....................",
+  "................BKKK...........KKK......................",
+  "................BBKB...........KKK......................",
+  "...............................KKK......................"
+];
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d", { alpha: false });
+let audioContext = null;
+let lastFrameTime = performance.now();
+
+function resizeCanvas() {
+  const scale = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(WIDTH * scale * dpr));
+  canvas.height = Math.max(1, Math.round(HEIGHT * scale * dpr));
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener("resize", resizeCanvas, { passive: true });
+resizeCanvas();
+
+function rand(min, max) { return min + Math.random() * (max - min); }
+function choice(items) { return items[Math.floor(Math.random() * items.length)]; }
+function rect(x1, y1, x2, y2, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.trunc(x1), Math.trunc(y1), Math.trunc(x2) - Math.trunc(x1), Math.trunc(y2) - Math.trunc(y1));
+}
+function polygon(points, fill, stroke = null, lineWidth = 1) {
+  ctx.beginPath();
+  ctx.moveTo(points[0], points[1]);
+  for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth; ctx.lineJoin = "miter"; ctx.stroke(); }
+}
+function text(x, y, value, color, size, bold = false, family = '"Microsoft YaHei", "Noto Sans CJK SC", sans-serif', align = "center", baseline = "middle") {
+  ctx.fillStyle = color;
+  ctx.font = `${bold ? "bold " : ""}${size}px ${family}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+  ctx.fillText(String(value), x, y);
+}
+function translucentOverlay(color = "#1b1330", alpha = 0.5) {
+  ctx.globalAlpha = alpha;
+  rect(0, 0, WIDTH, HEIGHT, color);
+  ctx.globalAlpha = 1;
+}
+function playSound(frequency, duration) {
+  if (!audioContext) return;
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = "square";
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(0.035, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration / 1000);
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + duration / 1000);
+}
+function enableAudio() {
+  if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioContext.state === "suspended") audioContext.resume();
+}
+
+class MusicPlayer {
+  constructor() {
+    this.tracks = {
+      1: document.getElementById("bgm1"),
+      2: document.getElementById("bgm2"),
+      3: document.getElementById("bgm3")
+    };
+    this.currentTrack = null;
+    this.unlocked = false;
+    this.enabled = true;
+    for (const track of Object.values(this.tracks)) track.volume = 0.35;
+  }
+
+  unlock() {
+    this.unlocked = true;
+  }
+
+  toggle() {
+    this.enabled = !this.enabled;
+  }
+
+  sync(mode, level) {
+    const activeTrack = this.unlocked && mode === "playing" ? this.tracks[level] : null;
+    const shouldPlay = activeTrack && this.enabled && document.visibilityState === "visible";
+
+    if (this.currentTrack !== activeTrack) {
+      if (this.currentTrack) {
+        this.currentTrack.pause();
+        this.currentTrack.currentTime = 0;
+      }
+      if (activeTrack) activeTrack.currentTime = 0;
+      this.currentTrack = activeTrack;
+    }
+
+    if (!shouldPlay) {
+      if (this.currentTrack) this.currentTrack.pause();
+      return;
+    }
+
+    if (this.currentTrack && this.currentTrack.paused) {
+      this.currentTrack.play().catch(error => {
+        console.warn("背景音乐播放失败：", error);
+      });
+    }
+  }
+}
+
+const music = new MusicPlayer();
+
+class Game {
+  constructor() {
+    this.keys = new Set();
+    this.best = { 1: 0, 2: 0, 3: 0 };
+    this.bestTotal = 0;
+    this.totalScore = 0;
+    this.mode = "title";
+    this.level = 1;
+    this.nextLevel = 2;
+    this.titleTimer = 0;
+    this.transitionTimer = 0;
+    this.clearTimer = 0;
+    this.victoryTimer = 0;
+    this.confetti = [];
+    this.confettiTimer = 0;
+    this.resetLevel(1);
+  }
+
+  resetLevel(level) {
+    this.level = level;
+    this.score = 0;
+    this.lives = 3;
+    this.elapsed = 0;
+    this.levelTime = 0;
+    this.playerX = 110;
+    this.playerY = GROUND_Y - 48;
+    this.playerVy = 0;
+    this.onGround = true;
+    this.jumpsUsed = 0;
+    this.obstacles = [];
+    this.spikes = [];
+    this.puffs = [];
+    this.spawnTimer = level === 3 ? 1.3 : 0.8;
+    this.worldSpeed = BASE_SPEED;
+    this.phase = "run";
+    this.bossStarted = false;
+    this.bossActive = false;
+    this.bossWarningTimer = 0;
+    this.bossTimer = 0;
+    this.bossEnter = 0;
+    this.bossDropTimer = 1.2;
+    this.bossBalls = 0;
+    this.bossShotTimer = 1.35;
+    this.bossFlash = 0;
+    this.volley = 0;
+    this.invulnTimer = 0;
+    this.scorePopupTimer = 0;
+    this.damagePopupTimer = 0;
+    this.levelBannerTimer = 0;
+  }
+
+  startLevel(level) {
+    this.resetLevel(level);
+    this.levelBannerTimer = 0;
+    this.confetti = [];
+    this.mode = "playing";
+  }
+
+  showTitle() {
+    this.resetLevel(1);
+    this.mode = "title";
+    this.totalScore = 0;
+    this.titleTimer = 0;
+    this.confetti = [];
+  }
+
+  levelComplete() {
+    this.best[this.level] = Math.max(this.best[this.level], this.score);
+    this.totalScore += this.score;
+    this.confetti = [];
+    if (this.level < 3) {
+      this.mode = "transition";
+      this.nextLevel = this.level + 1;
+      this.transitionTimer = 0;
+    } else {
+      this.startClear();
+    }
+  }
+
+  startClear() {
+    this.mode = "clear";
+    this.clearTimer = 3;
+    this.confetti = [];
+    this.confettiTimer = 0.35;
+    this.spawnConfetti(160, null, null);
+    playSound(1046, 140);
+  }
+
+  startTitleAward() {
+    this.mode = "title_award";
+    this.victoryTimer = 0;
+    this.bestTotal = Math.max(this.bestTotal, this.totalScore);
+    this.spawnConfetti(60, 400, 120);
+  }
+
+  step(dt) {
+    if (this.mode === "playing") this.updatePlaying(dt);
+    else if (this.mode === "clear") {
+      this.clearTimer -= dt;
+      this.updateConfetti(dt);
+      if (this.clearTimer <= 0) this.startTitleAward();
+    } else if (this.mode === "title_award") {
+      this.victoryTimer += dt;
+      this.updateConfetti(dt);
+    } else if (this.mode === "transition") this.transitionTimer += dt;
+    else if (this.mode === "title") this.titleTimer += dt;
+  }
+
+  updatePlaying(dt) {
+    if (this.level === 1 || this.level === 2) dt = FPS_MS / 1000;
+    this.elapsed += dt;
+    this.levelTime += dt;
+    this.scorePopupTimer = Math.max(0, this.scorePopupTimer - dt);
+    this.damagePopupTimer = Math.max(0, this.damagePopupTimer - dt);
+    this.invulnTimer = Math.max(0, this.invulnTimer - dt);
+    this.bossFlash = Math.max(0, this.bossFlash - dt);
+
+    if (this.level === 1) this.worldSpeed = Math.min(BASE_SPEED + this.elapsed * 7.2, MAX_SPEED);
+    else if (this.level === 2) {
+      this.worldSpeed = this.score < 5 ? BASE_SPEED : Math.min(BASE_SPEED + (this.score - 5) * 18, MAX_SPEED);
+    } else this.worldSpeed = Math.min(BASE_SPEED + this.levelTime * 7.2, MAX_SPEED);
+
+    if (this.phase === "run") {
+      if ((this.level === 2 && this.score >= LEVEL2_BOSS_SCORE) ||
+          (this.level === 3 && this.score >= LEVEL3_BOSS_SCORE)) {
+        this.phase = "warning";
+        this.bossWarningTimer = BOSS_WARNING;
+        playSound(330, 180);
+      }
+    } else if (this.phase === "warning") {
+      this.bossWarningTimer = Math.max(0, this.bossWarningTimer - dt);
+      if (this.bossWarningTimer <= 0) this.startBoss();
+    } else if (this.phase === "boss") {
+      if (this.level === 2) this.updatePinkBoss(dt);
+      else this.updateBeeBoss(dt);
+      if (this.mode !== "playing") return;
+    }
+
+    this.spawnObstacles(dt);
+    this.updatePlayer(dt);
+    this.updateObstacles(dt);
+    if (this.mode !== "playing") return;
+    this.updateSpikes(dt);
+    if (this.mode !== "playing") return;
+    this.updatePuffs(dt);
+  }
+
+  startBoss() {
+    this.phase = "boss";
+    this.bossActive = true;
+    if (this.level === 2) {
+      this.bossDropTimer = 0.7;
+      this.bossBalls = 0;
+    } else {
+      this.bossTimer = BOSS_TIME;
+      this.bossEnter = 0.7;
+      this.bossShotTimer = 1.35;
+      this.spikes = [];
+      this.obstacles = [];
+    }
+    playSound(196, 220);
+  }
+
+  pinkBossPosition() {
+    return [520 + Math.sin(this.elapsed * 0.8) * 75, 75 + Math.sin(this.elapsed * 2.1) * 15];
+  }
+
+  updatePinkBoss(dt) {
+    this.bossDropTimer -= dt;
+    if (this.bossDropTimer <= 0) {
+      const [bx, by] = this.pinkBossPosition();
+      this.obstacles.push({
+        x: bx + Math.floor(rand(-12, 25)), y: by + 66, kind: "potion",
+        vy: rand(72, 144), boss_drop: true
+      });
+      this.bossBalls += 1;
+      this.bossDropTimer = rand(1.1, 2.0);
+      playSound(300, 50);
+      if (this.bossBalls >= 10) this.levelComplete();
+    }
+  }
+
+  beePosition() {
+    const enter = this.bossEnter / 0.7;
+    return [566 + enter * enter * 250 + Math.sin(this.elapsed * 1.1) * 46,
+      132 + Math.sin(this.elapsed * 2.3) * 14];
+  }
+
+  updateBeeBoss(dt) {
+    this.bossTimer = Math.max(0, this.bossTimer - dt);
+    this.bossEnter = Math.max(0, this.bossEnter - dt);
+    this.bossShotTimer -= dt;
+    if (this.bossShotTimer <= 0) this.fireBeeSpikes();
+    if (this.bossTimer <= 0) this.levelComplete();
+  }
+
+  fireBeeSpikes() {
+    const [cx, cy] = this.beePosition();
+    const startX = cx + 54;
+    const startY = cy + 47;
+    const targetY = GROUND_Y - rand(6, 46);
+    const base = Math.atan2(targetY - startY, (this.playerX + 22) - startX);
+    const progress = 1 - this.bossTimer / BOSS_TIME;
+    this.volley += 1;
+    const offsets = this.volley % 3 === 0 ? [-0.09, -0.045, 0, 0.045, 0.09] : [-0.05, 0, 0.05];
+    for (const offset of offsets) {
+      const angle = base + offset + rand(-0.03, 0.03);
+      const speed = 396 + progress * 102;
+      this.spikes.push({
+        x: startX, y: startY,
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, angle
+      });
+    }
+    this.bossFlash = 0.3;
+    this.bossShotTimer = Math.max(0.8, 1.2 - progress * 0.35);
+    playSound(240, 45);
+  }
+
+  updateSpikes(dt) {
+    let hit = null;
+    for (const spike of this.spikes) {
+      spike.x += spike.vx * dt;
+      spike.y += spike.vy * dt;
+      if (this.invulnTimer <= 0 && this.spikeHitsPlayer(spike)) { hit = spike; break; }
+    }
+    if (hit) {
+      this.spikes.splice(this.spikes.indexOf(hit), 1);
+      this.hurtPlayer();
+    }
+    this.spikes = this.spikes.filter(s => s.x > -60 && s.x < WIDTH + 60 && s.y > -60 && s.y < GROUND_Y + 14);
+  }
+
+  spikeHitsPlayer(spike) {
+    const box = [this.playerX + 3, this.playerY + 4, this.playerX + 46, this.playerY + 48];
+    return box[0] - 6 < spike.x && spike.x < box[2] + 6 &&
+      box[1] - 6 < spike.y && spike.y < box[3] + 6;
+  }
+
+  jumpLimit() {
+    if (this.level === 3 || (this.level === 2 && this.phase === "boss")) return 3;
+    return 2;
+  }
+
+  jump() {
+    const limit = this.jumpLimit();
+    if (this.onGround) {
+      this.playerVy = -780;
+      this.onGround = false;
+      this.jumpsUsed = 1;
+      playSound(660, 65);
+    } else if (this.jumpsUsed < limit) {
+      this.playerVy = this.level === 3 ? (this.jumpsUsed === 1 ? -660 : -600) : -720;
+      this.jumpsUsed += 1;
+      this.puffs.push({ x: this.playerX + 24, y: this.playerY + 44, age: 0 });
+      playSound(820 + this.jumpsUsed * 110, 70);
+    }
+  }
+
+  hurtPlayer() {
+    this.lives -= 1;
+    this.invulnTimer = 1.4;
+    this.damagePopupTimer = 1;
+    if (this.lives <= 0) { this.mode = "dead"; playSound(180, 260); }
+    else playSound(260, 120);
+  }
+
+  spawnObstacles(dt) {
+    if (this.levelBannerTimer > 0 || (this.level === 3 && this.phase === "boss")) return;
+    this.spawnTimer -= dt;
+    if (this.spawnTimer > 0) return;
+    const kind = choice(["cactus", "double", "bird"]);
+    const heightLevel = choice(["low", "high"]);
+    const obstacle = { x: WIDTH + 20, kind, level: heightLevel };
+    if (kind === "bird") obstacle.y = GROUND_Y - (heightLevel === "low" ? 65 : 105);
+    else obstacle.height = heightLevel === "low" ? 34 : 54;
+    this.obstacles.push(obstacle);
+    if (this.level === 3) this.spawnTimer = rand(0.9, 1.6) * Math.max(0.62, 1 - this.levelTime * 0.006);
+    else this.spawnTimer = rand(0.9, 1.6) * Math.max(0.58, 1 - this.elapsed * 0.008);
+  }
+
+  updatePlayer(dt) {
+    this.playerVy += GRAVITY * dt;
+    this.playerY += this.playerVy * dt;
+    if (this.playerY < 8) { this.playerY = 8; this.playerVy = Math.max(0, this.playerVy); }
+    if (this.level === 2 && this.phase === "boss") {
+      const [, bossY] = this.pinkBossPosition();
+      if (this.playerY < bossY) { this.playerY = bossY; this.playerVy = 0; }
+    }
+    if (this.playerY >= GROUND_Y - 48) {
+      this.playerY = GROUND_Y - 48;
+      this.playerVy = 0;
+      this.onGround = true;
+      this.jumpsUsed = 0;
+    }
+  }
+
+  updateObstacles(dt) {
+    for (const obstacle of this.obstacles) {
+      obstacle.x -= this.worldSpeed * dt;
+      if (obstacle.kind === "potion") {
+        obstacle.y += obstacle.vy * dt;
+        obstacle.vy += 792 * dt;
+      }
+      const width = { bird: 40, double: 52, potion: 38 }[obstacle.kind] || 35;
+      if (!obstacle.passed && !obstacle.boss_drop && obstacle.x + width < this.playerX) {
+        obstacle.passed = true;
+        this.score += 1;
+        this.best[this.level] = Math.max(this.best[this.level], this.score);
+        this.scorePopupTimer = 0.8;
+        playSound(1046, 75);
+        if (this.level === 1 && this.score >= LEVEL1_GOAL) { this.levelComplete(); return; }
+      }
+    }
+    this.obstacles = this.obstacles.filter(o => o.x > -80 && (o.kind !== "potion" || o.y < GROUND_Y));
+    const collided = this.obstacles.filter(o => this.collides(o));
+    if (collided.length) {
+      this.obstacles = this.obstacles.filter(o => !collided.includes(o));
+      if (this.invulnTimer <= 0) this.hurtPlayer();
+    }
+  }
+
+  collides(obstacle) {
+    const player = [this.playerX + 1, this.playerY + 3, this.playerX + 47, this.playerY + 48];
+    const x = obstacle.x;
+    let other;
+    if (obstacle.kind === "potion") other = [x + 3, obstacle.y + 10, x + 37, obstacle.y + 49];
+    else if (obstacle.kind === "bird") {
+      const y = obstacle.y === undefined ? GROUND_Y - 65 : obstacle.y;
+      other = [x + 4, y, x + 40, y + 27];
+    } else if (obstacle.kind === "double") {
+      const h = obstacle.height === undefined ? 42 : obstacle.height;
+      other = [x + 4, GROUND_Y - h, x + 52, GROUND_Y];
+    } else {
+      const h = obstacle.height === undefined ? 42 : obstacle.height;
+      other = [x + 4, GROUND_Y - h, x + 35, GROUND_Y];
+    }
+    return player[0] < other[2] && player[2] > other[0] &&
+      player[1] < other[3] && player[3] > other[1];
+  }
+
+  updatePuffs(dt) {
+    for (const puff of this.puffs) puff.age += dt;
+    this.puffs = this.puffs.filter(p => p.age < 0.35);
+  }
+
+  inputAction() {
+    enableAudio();
+    music.unlock();
+    if (this.mode === "title") this.startLevel(1);
+    else if (this.mode === "transition") this.startLevel(this.nextLevel);
+    else if (this.mode === "dead") this.startLevel(this.level);
+    else if (this.mode === "playing") this.jump();
+    else if (this.mode === "title_award") this.showTitle();
+    music.sync(this.mode, this.level);
+  }
+
+  keyDown(event) {
+    const key = event.key.toLowerCase();
+    if (this.keys.has(key)) return;
+    this.keys.add(key);
+    if (key === "m") {
+      music.toggle();
+      music.sync(this.mode, this.level);
+      return;
+    }
+    if (key === "r" && ["playing", "dead", "transition", "title_award"].includes(this.mode)) {
+      this.showTitle();
+      return;
+    }
+    if (key === " " || key === "arrowup" || key === "w") this.inputAction();
+  }
+
+  keyUp(event) { this.keys.delete(event.key.toLowerCase()); }
+
+  draw() {
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    if (this.mode === "title") { this.drawTitle(); return; }
+    if (this.mode === "transition") { this.drawTransition(); return; }
+    if (this.mode === "clear") { this.drawClearPage(); return; }
+    if (this.mode === "title_award") { this.drawTitleAward(); return; }
+
+    this.drawLevelBackground();
+    if (this.phase === "boss") {
+      if (this.level === 2) this.drawPinkBoss();
+      else this.drawBeeBoss();
+    }
+    for (const puff of this.puffs) {
+      const radius = 6 + puff.age * 80;
+      ctx.beginPath();
+      ctx.ellipse(puff.x, puff.y, radius, radius * 0.45, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (!(this.invulnTimer > 0 && Math.trunc(this.elapsed * 20) % 2) || this.mode === "dead") this.drawPlayer();
+    for (const obstacle of this.obstacles) this.drawObstacle(obstacle);
+    for (const spike of this.spikes) this.drawSpike(spike);
+    this.drawHud();
+    if (this.phase === "warning") {
+      const color = Math.trunc(this.bossWarningTimer * 6) % 2 === 0 ? "#e32636" : "#ff7a2f";
+      text(WIDTH / 2, 72, "BOSS 即将来临！", color, 24, true);
+      text(WIDTH / 2, 106, Math.max(1, Math.ceil(this.bossWarningTimer)), "#3a2440", 14, true);
+    }
+    if (this.mode === "dead") this.drawDeadPanel();
+  }
+
+  drawHeart(x, y, filled) {
+    const color = filled ? "#ef3f4f" : "#a5a5a5";
+    rect(x + 2, y, x + 6, y + 4, color);
+    rect(x + 10, y, x + 14, y + 4, color);
+    rect(x, y + 3, x + 16, y + 8, color);
+    rect(x + 2, y + 8, x + 14, y + 11, color);
+    rect(x + 5, y + 11, x + 11, y + 14, color);
+    rect(x + 7, y + 14, x + 9, y + 16, color);
+  }
+
+  drawGrassHero(x, y, scale = 1, sway = 0) {
+    const hx = v => x + v * scale;
+    const hy = v => y + v * scale;
+    polygon([
+      hx(6), hy(40), hx(3), hy(36), hx(3), hy(32), hx(0), hy(29),
+      hx(4), hy(26), hx(1), hy(23), hx(7), hy(22), hx(7), hy(14),
+      hx(11), hy(20), hx(12), hy(14), hx(17), hy(18), hx(22), hy(5),
+      hx(25), hy(2), hx(29), hy(16), hx(33), hy(10), hx(36), hy(17),
+      hx(40), hy(11), hx(42), hy(19), hx(44), hy(14), hx(44), hy(23),
+      hx(48), hy(26), hx(43), hy(29), hx(43), hy(34), hx(39), hy(40),
+      hx(35), hy(42), hx(10), hy(42)
+    ], "#b9d94c", "#765343", Math.max(1, Math.round(3 * scale)));
+    rect(hx(12 - sway), hy(20), hx(17 - sway), hy(24), "#765343");
+    rect(hx(32 + sway), hy(20), hx(37 + sway), hy(24), "#765343");
+    rect(hx(20), hy(27), hx(28), hy(30), "#765343");
+    rect(hx(18), hy(25), hx(21), hy(28), "#765343");
+    rect(hx(27), hy(25), hx(30), hy(28), "#765343");
+    rect(hx(10), hy(30), hx(13), hy(33), "#765343");
+    rect(hx(38), hy(30), hx(41), hy(33), "#765343");
+    rect(hx(12 + sway), hy(42), hx(20 + sway), hy(47), "#765343");
+    rect(hx(31 - sway), hy(42), hx(39 - sway), hy(47), "#765343");
+  }
+
+  drawPlayer() {
+    const sway = this.mode === "playing" && Math.trunc(this.elapsed * 12) % 2 ? 4 : 0;
+    this.drawGrassHero(this.playerX, Math.trunc(this.playerY), 1, sway);
+  }
+
+  drawGround() {
+    rect(0, GROUND_Y, WIDTH, HEIGHT, "#473b52");
+    rect(0, GROUND_Y, WIDTH, GROUND_Y + 8, "#78d66b");
+    const offset = Math.trunc(this.elapsed * this.worldSpeed / 30) % 48;
+    for (let x = 0; x < WIDTH; x += 48) rect(x - offset, GROUND_Y + 22, x + 18 - offset, GROUND_Y + 27, "#766782");
+  }
+
+  drawSeasonBackground() {
+    const season = Math.min(Math.floor(this.score / 10), 3);
+    const bg = ["#8bd5ff", "#74cbf8", "#f5d0a9", "#c9d6df"];
+    const hills = [["#b8edb0", "#9bdc9a"], ["#66cdaa", "#4caf50"], ["#e6b981", "#c88c4c"], ["#e0f7fa", "#b2ebf2"]];
+    const groundTop = ["#78d66b", "#32cd32", "#ff8c00", "#ffffff"];
+    ctx.fillStyle = bg[season];
+    rect(0, 0, WIDTH, HEIGHT, bg[season]);
+    rect(0, 300, WIDTH, GROUND_Y, hills[season][0]);
+    for (let x = -30; x < WIDTH + 100; x += 150) {
+      rect(x, 320, x + 55, 350, hills[season][1]);
+      rect(x + 25, 305, x + 95, 350, hills[season][1]);
+    }
+    rect(700, 65, 754, 119, "#ffe16b");
+    for (const [x, y] of [[110, 82], [350, 125], [690, 180]]) {
+      rect(x, y + 10, x + 62, y + 24, "#ffffff");
+      rect(x + 14, y, x + 48, y + 30, "#ffffff");
+    }
+    rect(0, GROUND_Y, WIDTH, HEIGHT, "#473b52");
+    rect(0, GROUND_Y, WIDTH, GROUND_Y + 8, groundTop[season]);
+    const offset = Math.trunc(this.elapsed * this.worldSpeed / 30) % 48;
+    for (let x = 0; x < WIDTH; x += 48) rect(x - offset, GROUND_Y + 22, x + 18 - offset, GROUND_Y + 27, "#766782");
+    this.drawWeather(season);
+  }
+
+  drawWeather(season) {
+    const t = this.elapsed;
+    const configs = [
+      [8, 50, 120, 80, 60, 5, 5, "#ffb7c5"],
+      [8, 60, 110, 100, 50, 6, 4, "#4caf50"],
+      [8, 70, 100, 90, 70, 6, 6, "#d32f2f"],
+      [12, 40, 80, 70, 40, 4, 4, "#ffffff"]
+    ];
+    const [count, sx, stepX, sy, stepY, w, h, color] = configs[season];
+    for (let i = 0; i < count; i++) {
+      const px = WIDTH - (t * sx + i * stepX) % (WIDTH + 100);
+      const py = (t * sy + i * stepY) % HEIGHT;
+      rect(px, py, px + w, py + h, color);
+    }
+  }
+
+  drawSoftBackground() {
+    rect(0, 0, WIDTH, HEIGHT, "#8bd5ff");
+    rect(0, 300, WIDTH, GROUND_Y, "#b8edb0");
+    for (let x = -30; x < WIDTH + 100; x += 150) {
+      rect(x, 320, x + 55, 350, "#9bdc9a");
+      rect(x + 25, 305, x + 95, 350, "#9bdc9a");
+    }
+    rect(700, 65, 754, 119, "#ffe16b");
+    for (const [x, y] of [[110, 82], [350, 125], [690, 180]]) {
+      rect(x, y + 10, x + 62, y + 24, "#ffffff");
+      rect(x + 14, y, x + 48, y + 30, "#ffffff");
+    }
+    this.drawGround();
+  }
+
+  drawProceduralBackground() {
+    for (const [top, bottom, color] of [
+      [0, 45, "#9fc9f1"], [45, 105, "#d6b9e9"], [105, 128, "#fab9d5"],
+      [128, 165, "#fdb09e"], [165, 226, "#fee497"], [226, 278, "#fbfa9d"],
+      [278, 368, "#d6dd75"], [368, 380, "#74b034"]
+    ]) rect(0, top, WIDTH, bottom, color);
+    for (const [y, color] of [
+      [42, "#c2d0eb"], [102, "#e8bde5"], [125, "#fbb7ba"], [162, "#fdc8a0"],
+      [223, "#fcf29e"], [275, "#e6eb92"], [365, "#b4da5f"]
+    ]) rect(0, y, WIDTH, y + 4, color);
+    for (const [x, y, w, h, color] of [
+      [56, 66, 84, 38, "#f7eccd"], [278, 120, 112, 50, "#f7eccd"], [504, 201, 84, 40, "#fbf8e8"]
+    ]) {
+      rect(x, y + h * 0.4, x + w, y + h, color);
+      rect(x + w * 0.28, y, x + w * 0.72, y + h, color);
+    }
+    for (const [x, y, w, h] of [[22, 292, 78, 68], [216, 292, 107, 68], [446, 300, 72, 60], [682, 292, 76, 68]]) {
+      rect(x, y + 14, x + w, y + h, "#b7c660");
+      rect(x + w * 0.22, y, x + w * 0.72, y + h, "#b7c660");
+    }
+    this.drawGround();
+  }
+
+  drawLevelBackground() {
+    if (this.level === 1) this.drawSeasonBackground();
+    else if (this.level === 2) this.drawSoftBackground();
+    else this.drawProceduralBackground();
+  }
+
+  drawObstacle(obstacle) {
+    const x = Math.trunc(obstacle.x);
+    if (obstacle.kind === "potion") this.drawPotion(x, Math.trunc(obstacle.y));
+    else if (obstacle.kind === "bird") {
+      const y = obstacle.y === undefined ? GROUND_Y - 65 : obstacle.y;
+      rect(x + 8, y + 8, x + 34, y + 22, "#7548a5");
+      rect(x + 27, y + 5, x + 39, y + 14, "#7548a5");
+      rect(x + 35, y + 8, x + 39, y + 12, "#ffe16b");
+      const wingY = y + (Math.trunc(this.elapsed * 18) % 2 ? 18 : 2);
+      rect(x + 12, wingY, x + 30, wingY + 8, "#a978d1");
+    } else {
+      const height = obstacle.height === undefined ? 42 : obstacle.height;
+      const branchY = GROUND_Y - height + Math.trunc(height * 0.3);
+      const otherY = GROUND_Y - height + Math.trunc(height * 0.55);
+      rect(x + 12, GROUND_Y - height, x + 27, GROUND_Y, "#36a866");
+      rect(x + 4, branchY, x + 12, branchY + 8, "#36a866");
+      rect(x + 4, branchY, x + 13, branchY + 5, "#36a866");
+      rect(x + 27, otherY, x + 35, otherY + 8, "#36a866");
+      rect(x + 26, otherY, x + 35, otherY + 5, "#36a866");
+      if (obstacle.kind === "double") {
+        const second = Math.max(22, height - 8);
+        rect(x + 39, GROUND_Y - second, x + 51, GROUND_Y, "#36a866");
+        rect(x + 34, GROUND_Y - second + 8, x + 40, GROUND_Y - second + 16, "#36a866");
+      }
+    }
+  }
+
+  drawPotion(x, y) {
+    rect(x + 13, y, x + 27, y + 8, "#f6a64b");
+    rect(x + 10, y + 7, x + 30, y + 13, "#ef5d63");
+    rect(x + 14, y + 12, x + 26, y + 22, "#70508e");
+    rect(x + 9, y + 18, x + 31, y + 25, "#63d5e5");
+    rect(x + 5, y + 23, x + 35, y + 31, "#48b9cf");
+    rect(x + 1, y + 29, x + 38, y + 48, "#da4da9");
+    rect(x + 5, y + 26, x + 14, y + 42, "#75d85f");
+    rect(x + 14, y + 25, x + 25, y + 40, "#f4db4f");
+    rect(x + 25, y + 28, x + 35, y + 43, "#f08b45");
+    rect(x + 7, y + 42, x + 32, y + 50, "#b842aa");
+    rect(x + 16, y + 33, x + 21, y + 38, "#ffffff");
+  }
+
+  drawPinkBoss() {
+    let [x, y] = this.pinkBossPosition();
+    x = Math.trunc(x); y = Math.trunc(y);
+    for (const [dx1, dy1, dx2, dy2, color] of [
+      [30, 34, 100, 58, "#f06ab4"], [18, 25, 54, 49, "#ffffff"], [8, 19, 36, 39, "#ffffff"],
+      [4, 24, 16, 33, "#f06ab4"], [25, 11, 34, 25, "#ffd86b"], [10, 10, 29, 20, "#f06ab4"],
+      [20, 3, 38, 14, "#f06ab4"], [31, -2, 48, 10, "#f06ab4"], [43, 5, 68, 19, "#f06ab4"],
+      [60, 16, 91, 29, "#f06ab4"], [85, 27, 119, 41, "#f06ab4"], [108, 36, 134, 47, "#f06ab4"],
+      [125, 34, 140, 42, "#f06ab4"], [48, 15, 61, 23, "#70d9ee"], [67, 25, 86, 32, "#70d9ee"],
+      [91, 33, 112, 40, "#70d9ee"], [14, 15, 24, 21, "#ffe16b"], [105, 42, 130, 49, "#ffe16b"],
+      [38, 52, 49, 72, "#ffffff"], [72, 52, 83, 68, "#ffffff"], [18, 24, 22, 29, "#20202b"],
+      [43, 30, 59, 49, "#f6a5d0"], [31, 44, 46, 53, "#f06ab4"], [63, 39, 91, 47, "#f06ab4"]
+    ]) rect(x + dx1, y + dy1, x + dx2, y + dy2, color);
+  }
+
+  drawBeeBoss() {
+    const [cx, cy] = this.beePosition();
+    if (this.bossFlash > 0) {
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = "#ffe9a8";
+      ctx.beginPath(); ctx.ellipse(cx + 55, cy + 48, 21, 22, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    const originX = Math.trunc(cx) - 84;
+    const originY = Math.trunc(cy) - 77;
+    for (let y = 0; y < BEE_PIXELS.length; y++) {
+      const row = BEE_PIXELS[y];
+      for (let x = 0; x < row.length; x++) {
+        const color = BEE_PALETTE[row[x]];
+        if (color) rect(originX + x * 3, originY + y * 3, originX + (x + 1) * 3, originY + (y + 1) * 3, color);
+      }
+    }
+    if (this.bossShotTimer < 0.25) rect(cx + 50, cy + 43, cx + 60, cy + 53,
+      Math.trunc(this.elapsed * 30) % 2 ? "#fff6c0" : "#ffd166");
+  }
+
+  drawSpike(spike) {
+    const { angle, x, y } = spike;
+    const dx = Math.cos(angle), dy = Math.sin(angle), px = -dy, py = dx;
+    const length = 46, half = 8;
+    polygon([
+      x, y, x - dx * length + px * half, y - dy * length + py * half,
+      x - dx * length * 0.8, y - dy * length * 0.8,
+      x - dx * length - px * half, y - dy * length - py * half
+    ], "#0d0a12", "#6b4f8a", 1);
+    polygon([
+      x - dx * 12, y - dy * 12,
+      x - dx * 30 + px * 1.8, y - dy * 30 + py * 1.8,
+      x - dx * 30 - px * 1.8, y - dy * 30 - py * 1.8
+    ], "#2c1d3e");
+  }
+
+  drawHud() {
+    text(22, 12, `SCORE  ${String(this.score).padStart(4, "0")}`, "#24324a", 18, true, "Consolas, monospace", "left", "top");
+    text(200, 22, `第 ${this.level} 关 · ${LEVEL_NAMES[this.level]}`, "#3d2b5c", 9, true, undefined, "left", "top");
+    text(WIDTH - 22, 16, `BEST  ${String(this.best[this.level]).padStart(4, "0")}`, "#24324a", 13, true, "Consolas, monospace", "right", "top");
+    text(WIDTH - 22, 34, `M 音乐：${music.enabled ? "开" : "关"}`, "#3d2b5c", 9, true, undefined, "right", "top");
+
+    if (this.phase === "boss" && this.level === 3) {
+      const ratio = this.bossTimer / BOSS_TIME;
+      text(22, 44, `BOSS 停留  ${this.bossTimer.toFixed(1).padStart(4, "0")}s`, "#2b1d3f", 10, true, undefined, "left", "top");
+      ctx.globalAlpha = 0.5; rect(22, 64, 242, 76, "#ffffff"); ctx.globalAlpha = 1;
+      if (ratio > 0) rect(22, 64, 22 + 220 * ratio, 76, ratio > 0.55 ? "#4cc9f0" : ratio > 0.25 ? "#ffd166" : "#ef476f");
+      text(22, 82, "撑过 15 秒即可通关！", "#5a2f4a", 9, true, undefined, "left", "top");
+    } else {
+      let label, fill, ratio;
+      if (this.level === 1) { label = `过关  ${this.score}/${LEVEL1_GOAL}`; fill = "#7a5bd6"; ratio = Math.min(1, this.score / LEVEL1_GOAL); }
+      else if (this.level === 2 && this.phase === "boss") { label = `药水  ${this.bossBalls}/10`; fill = "#ef476f"; ratio = Math.min(1, this.bossBalls / 10); }
+      else if (this.level === 2) { label = `BOSS  ${this.score}/${LEVEL2_BOSS_SCORE}`; fill = "#7a5bd6"; ratio = Math.min(1, this.score / LEVEL2_BOSS_SCORE); }
+      else { label = `BOSS  ${this.score}/${LEVEL3_BOSS_SCORE}`; fill = "#ef476f"; ratio = Math.min(1, this.score / LEVEL3_BOSS_SCORE); }
+      ctx.globalAlpha = 0.5; rect(22, 46, 142, 54, "#ffffff"); ctx.globalAlpha = 1;
+      if (ratio > 0) rect(22, 46, 22 + 120 * ratio, 54, fill);
+      text(150, 42, label, "#3a3450", 9, true, undefined, "left", "top");
+    }
+
+    for (let i = 0; i < 3; i++) this.drawHeart(this.playerX - 2 + i * 16, Math.max(this.playerY - 17, 6), i < this.lives);
+    if (this.jumpLimit() > 2) this.drawJumpMeter();
+    if (this.scorePopupTimer > 0) text(this.playerX + 22, this.playerY - 12 - (0.8 - this.scorePopupTimer) * 24, "+1", "#258b4b", 16, true, "Consolas, monospace");
+    if (this.damagePopupTimer > 0) text(this.playerX + 22, this.playerY - 32 - (1 - this.damagePopupTimer) * 20, "-1 ♥", "#e53945", 16, true, "Consolas, monospace");
+  }
+
+  drawJumpMeter() {
+    const left = this.jumpLimit() - this.jumpsUsed;
+    text(22, HEIGHT - 40, "多段跳", "#ffe9a8", 9, true, undefined, "left", "top");
+    for (let i = 0; i < 3; i++) {
+      const x = 22 + i * 18;
+      polygon([x, HEIGHT - 20, x + 7, HEIGHT - 30, x + 14, HEIGHT - 20], i < left ? "#ef476f" : "#8a7aa0");
+    }
+  }
+
+  drawDeadPanel() {
+    translucentOverlay("#1b1330", 0.5);
+    rect(185, 145, 615, 295, "#27334b");
+    rect(192, 152, 608, 288, "#fff3d4");
+    text(WIDTH / 2, 192, "你死了！", "#ef5d63", 30, true);
+    text(WIDTH / 2, 235, "按 空格 重试本关", "#27334b", 13, true);
+    text(WIDTH / 2, 265, "R 回到标题", "#6b5a86", 10);
+  }
+
+  drawTitle() {
+    this.drawSoftBackground();
+    const bounce = Math.trunc(Math.sin(this.titleTimer * 2.2) * 5);
+    this.drawGrassHero(88, 248 + bounce, 2.6);
+    text(504, 114, "小草快跑", "#2c2340", 50, true);
+    text(500, 110, "小草快跑", "#ffd166", 50, true);
+    text(500, 168, "像素跑酷 · 三关冒险", "#3a3450", 15, true);
+    if (Math.trunc(this.titleTimer * 2) % 2 === 0) text(500, 288, "点击 / 按空格开始游戏", "#b03a4a", 17, true);
+    text(500, 326, "第 1 关 四季草原  ·  第 2 关 甜点山谷  ·  第 3 关 黄昏草原", "#3d2b5c", 10, true);
+    text(500, 354, "点击 / 空格 / ↑ / W 跳跃   ·   M 音乐开关   ·   R 重开", "#5b4a7a", 9);
+  }
+
+  drawTransition() {
+    this.drawSoftBackground();
+    translucentOverlay("#1b1330", 0.5);
+    rect(170, 120, 630, 330, "#27334b");
+    rect(178, 128, 622, 322, "#fff3d4");
+    text(WIDTH / 2, 172, `第 ${this.level} 关 通关！`, "#ef5d63", 28, true);
+    text(WIDTH / 2, 214, `本关得分  ${String(this.score).padStart(4, "0")}`, "#27334b", 14, true);
+    text(WIDTH / 2, 252, `下一关：第 ${this.nextLevel} 关 · ${LEVEL_NAMES[this.nextLevel]}`, "#6b5a86", 12);
+    if (Math.trunc(this.transitionTimer * 2) % 2 === 0) text(WIDTH / 2, 296, `点击 / 按空格进入第 ${this.nextLevel} 关`, "#b03a4a", 13, true);
+  }
+
+  drawClearPage() {
+    this.drawProceduralBackground();
+    translucentOverlay("#1b1330", 0.5);
+    text(WIDTH / 2, 130, "游戏通关！", "#ffe08a", 44, true);
+    text(WIDTH / 2, 186, "最终 BOSS 蜜蜂 已被击败", "#f3ecff", 15, true);
+    text(WIDTH / 2, 250, "称号揭晓中……", "#c9b6ff", 14);
+    text(WIDTH / 2, 318, Math.max(1, Math.ceil(this.clearTimer)), "#ffd166", 54, true);
+    text(WIDTH / 2, 372, "3 秒后揭晓「小草王」称号", "#a99fd0", 10);
+    for (const piece of this.confetti) {
+      const x = Math.trunc(piece.x), y = Math.trunc(piece.y), size = piece.size;
+      if (Math.trunc(this.clearTimer * 8 + piece.spin) % 2) rect(x, y, x + size, y + size, piece.color);
+      else rect(x, y, x + size * 1.4, y + size * 0.6, piece.color);
+    }
+  }
+
+  drawTitleAward() {
+    this.drawProceduralBackground();
+    translucentOverlay("#1a1230", 0.5);
+    ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.ellipse(150, 369, 88, 15, 0, 0, Math.PI * 2); ctx.fillStyle = "#120c1e"; ctx.fill(); ctx.globalAlpha = 1;
+    rect(352, 78, 786, 400, "#241c3a");
+    rect(358, 84, 780, 394, "#332750");
+    rect(358, 84, 780, 92, "#ffd166");
+    rect(358, 386, 780, 394, "#ffd166");
+    const bob = Math.trunc(Math.sin(this.victoryTimer * 2.2) * 4);
+    const heroX = 72, heroY = 222 + bob;
+    const sway = Math.trunc(this.victoryTimer * 4) % 2 ? 4 : 0;
+    this.drawGrassHero(heroX, heroY, 3.2, sway);
+    this.drawCrown(heroX + 24 * 3.2, heroY + 1 * 3.2, 1.15);
+    for (const [i, [sx, sy]] of [[66, 158], [236, 168], [48, 306], [252, 322], [198, 116]].entries()) {
+      const pulse = 0.6 + 0.4 * Math.sin(this.victoryTimer * 5 + i);
+      this.drawStar(sx, sy, 7 + 6 * pulse, "#ffe08a");
+    }
+    text(WIDTH / 2, 42, "游戏通关！", "#ffe08a", 20, true);
+    text(569, 118, "击败最终 BOSS", "#c9b6ff", 13, true);
+    text(572, 190, "小草王", "#160f26", 48, true);
+    text(568, 186, "小草王", "#ffd166", 48, true);
+    text(568, 252, "你通关《小草快跑》，加冕为「小草王」", "#f3ecff", 14);
+    rect(432, 282, 704, 286, "#6b5a9a");
+    text(568, 314, `三关总分  ${String(this.totalScore).padStart(4, "0")}`, "#ffd166", 22, true, "Consolas, monospace");
+    text(568, 346, `历史最高  ${String(this.bestTotal).padStart(4, "0")}`, "#a99fd0", 12);
+    text(568, 372, "点击 / 按空格再玩一次  ·  R 回到标题", "#c9b6ff", 11);
+    for (const piece of this.confetti) {
+      const x = Math.trunc(piece.x), y = Math.trunc(piece.y), size = piece.size;
+      if (Math.trunc(this.victoryTimer * 8 + piece.spin) % 2) rect(x, y, x + size, y + size, piece.color);
+      else rect(x, y, x + size * 1.4, y + size * 0.6, piece.color);
+    }
+  }
+
+  drawCrown(cx, baseY, scale = 1) {
+    const ox = v => cx + v * scale, oy = v => baseY + v * scale;
+    const edge = Math.max(2, Math.round(1.6 * scale));
+    polygon([ox(-40), oy(-2), ox(-56), oy(-30), ox(-30), oy(-8)], "#4fae35", "#245c14", edge);
+    polygon([ox(30), oy(-8), ox(56), oy(-30), ox(40), oy(-2)], "#4fae35", "#245c14", edge);
+    polygon([ox(-34), oy(2), ox(-24), oy(-36), ox(-8), oy(2)], "#ffd166", "#8c6418", edge);
+    polygon([ox(-8), oy(2), ox(0), oy(-54), ox(10), oy(2)], "#ffe08a", "#8c6418", edge);
+    polygon([ox(8), oy(2), ox(26), oy(-36), ox(34), oy(2)], "#ffd166", "#8c6418", edge);
+    rect(ox(-40), oy(-6), ox(40), oy(10), "#8c6418");
+    rect(ox(-36), oy(-4), ox(36), oy(7), "#ffd166");
+    rect(ox(-36), oy(-7), ox(36), oy(-2), "#ffe9a8");
+    rect(ox(-5), oy(-1), ox(5), oy(8), "#2f8f3a");
+    rect(ox(-2), oy(1), ox(2), oy(5), "#8fe05a");
+  }
+
+  drawStar(cx, cy, radius, color) {
+    const points = [];
+    for (let i = 0; i < 8; i++) {
+      const angle = -Math.PI / 2 + i * Math.PI / 4;
+      const distance = i % 2 === 0 ? radius : radius * 0.42;
+      points.push(cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance);
+    }
+    polygon(points, color);
+  }
+
+  spawnConfetti(count, originX, originY) {
+    const palette = ["#ffd166", "#ef476f", "#06d6a0", "#4cc9f0", "#ffffff", "#f78c6b", "#b388ff"];
+    for (let i = 0; i < count; i++) {
+      const x = originX === null ? rand(0, WIDTH) : originX + rand(-40, 40);
+      const y = originY === null ? rand(-60, -6) : originY + rand(-20, 20);
+      this.confetti.push({
+        x, y, vx: rand(-84, 84), vy: rand(72, 192),
+        size: choice([3, 4, 5, 6]), color: choice(palette), spin: rand(0, 6.28)
+      });
+    }
+  }
+
+  updateConfetti(dt) {
+    this.confettiTimer -= dt;
+    if (this.confettiTimer <= 0 && this.confetti.length < 220) {
+      this.spawnConfetti(16, rand(80, WIDTH - 80), rand(40, 140));
+      this.confettiTimer = rand(0.45, 0.9);
+    }
+    for (const piece of this.confetti) {
+      piece.x += (piece.vx + Math.sin(this.victoryTimer * 3 + piece.spin) * 30) * dt;
+      piece.y += piece.vy * dt;
+    }
+    this.confetti = this.confetti.filter(piece => piece.y < HEIGHT + 14);
+  }
+}
+
+const game = new Game();
+canvas.addEventListener("pointerdown", event => {
+  event.preventDefault();
+  canvas.focus({ preventScroll: true });
+  game.inputAction();
+});
+window.addEventListener("keydown", event => {
+  if ([" ", "ArrowUp"].includes(event.key)) event.preventDefault();
+  game.keyDown(event);
+});
+window.addEventListener("keyup", event => game.keyUp(event));
+window.addEventListener("blur", () => game.keys.clear());
+
+function frame(now) {
+  const dt = Math.min(Math.max((now - lastFrameTime) / 1000, 0), 0.05);
+  lastFrameTime = now;
+  game.step(dt);
+  music.sync(game.mode, game.level);
+  game.draw();
+  window.setTimeout(() => requestAnimationFrame(frame), Math.max(0, FPS_MS - (performance.now() - now)));
+}
+document.addEventListener("visibilitychange", () => music.sync(game.mode, game.level));
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
