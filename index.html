@@ -61,6 +61,9 @@
   </style>
 </head>
 <body>
+  <audio id="bgm1" src="music/level1.wav" loop preload="none"></audio>
+  <audio id="bgm2" src="music/level2.wav" loop preload="none"></audio>
+  <audio id="bgm3" src="music/level3.wav" loop preload="none"></audio>
   <canvas id="game" width="800" height="450" aria-label="小草快跑游戏画布" tabindex="0"></canvas>
   <div id="orientationNotice" role="status" aria-live="polite">
     <span class="phone" aria-hidden="true">📱</span>
@@ -208,6 +211,17 @@ class MusicPlayer {
       2: "music/level2.wav",
       3: "music/level3.wav"
     };
+    this.nativeTracks = {
+      1: document.getElementById("bgm1"),
+      2: document.getElementById("bgm2"),
+      3: document.getElementById("bgm3")
+    };
+    for (const track of Object.values(this.nativeTracks)) {
+      track.loop = true;
+      track.volume = 0.35;
+    }
+    this.nativeLevel = null;
+    this.nativePendingLevel = null;
     this.currentLevel = null;
     this.currentBuffer = null;
     this.currentSource = null;
@@ -231,6 +245,11 @@ class MusicPlayer {
   }
 
   sync(mode, level) {
+    if (location.protocol === "file:") {
+      this.syncNative(mode, level);
+      return;
+    }
+
     const activeLevel = this.unlocked && mode === "playing" ? level : null;
     if (activeLevel !== this.currentLevel) {
       this.requestId += 1;
@@ -259,6 +278,50 @@ class MusicPlayer {
       .finally(() => {
         if (requestId === this.requestId) this.loading = false;
       });
+  }
+
+  syncNative(mode, level) {
+    const activeLevel = this.unlocked && mode === "playing" ? level : null;
+    if (activeLevel !== this.nativeLevel) {
+      const previousTrack = this.nativeTracks[this.nativeLevel];
+      if (previousTrack) {
+        previousTrack.pause();
+        previousTrack.currentTime = 0;
+      }
+      this.nativeLevel = activeLevel;
+      this.nativePendingLevel = null;
+      this.failedLevel = null;
+    }
+
+    const track = this.nativeTracks[activeLevel];
+    const shouldPlay = activeLevel !== null && this.enabled && document.visibilityState === "visible";
+    if (!shouldPlay) {
+      if (track && !track.paused) track.pause();
+      return;
+    }
+
+    if (!track.paused || this.nativePendingLevel === activeLevel || this.failedLevel === activeLevel) return;
+    try {
+      const playRequest = track.play();
+      if (playRequest && typeof playRequest.then === "function") {
+        this.nativePendingLevel = activeLevel;
+        playRequest.then(
+          () => {
+            if (this.nativePendingLevel === activeLevel) this.nativePendingLevel = null;
+          },
+          error => {
+            if (this.nativeLevel === activeLevel) {
+              this.failedLevel = activeLevel;
+              console.error(`第 ${activeLevel} 关背景音乐播放失败：`, error);
+            }
+            if (this.nativePendingLevel === activeLevel) this.nativePendingLevel = null;
+          }
+        );
+      }
+    } catch (error) {
+      this.failedLevel = activeLevel;
+      console.error(`第 ${activeLevel} 关背景音乐播放失败：`, error);
+    }
   }
 
   isActive(level, requestId) {
